@@ -76,7 +76,19 @@ function initBoard(work,k){
  function point(ev){const r=work.getBoundingClientRect();return {x:Math.max(0,Math.min(1000,(ev.clientX-r.left)/r.width*1000)),y:Math.max(0,Math.min(500,(ev.clientY-r.top)/r.height*500))}}
  function strokePath(points){return points.map((pt,i)=>(i?'L':'M')+pt.x.toFixed(1)+' '+pt.y.toFixed(1)).join(' ')}
  function draw(){
-  ink.innerHTML=board.items.filter(it=>it.type==='stroke').concat(current?[current]:[]).map(it=>`<path d="${strokePath(it.points)}" fill="none" stroke="${it.tool==='eraser'?'#ffffff':it.color}" stroke-width="${it.tool==='eraser'?28:it.size}" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>`).join('');
+  // La goma es una máscara de transparencia: no pinta blanco ni modifica el fondo.
+  // Cada trazo se enmascara únicamente con las borraduras posteriores a él.
+  const strokes=board.items.filter(it=>it.type==='stroke').concat(current?[current]:[]);
+  const erasers=strokes.map((it,i)=>it.tool==='eraser'?i:-1).filter(i=>i>=0);
+  ink.innerHTML=strokes.map((it,i)=>{
+   if(it.tool==='eraser')return '';
+   const later=erasers.filter(j=>j>i);
+   const path=`<path d="${strokePath(it.points)}" fill="none" stroke="${it.color}" stroke-width="${it.size}" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>`;
+   if(!later.length)return path;
+   const id=`erase-${i}`;
+   const mask=`<mask id="${id}" maskUnits="userSpaceOnUse" x="0" y="0" width="1000" height="500" maskContentUnits="userSpaceOnUse"><rect width="1000" height="500" fill="white"/>${later.map(j=>`<path d="${strokePath(strokes[j].points)}" fill="none" stroke="black" stroke-width="28" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>`).join('')}</mask>`;
+   return `<defs>${mask}</defs><g mask="url(#${id})">${path}</g>`;
+  }).join('');
   objects.innerHTML='';
   board.items.forEach((it,index)=>{
    if(it.type!=='text')return;
@@ -114,7 +126,7 @@ function initBoard(work,k){
  $$('[data-color]',panel).forEach(b=>b.onclick=()=>{board.color=b.dataset.color;mode('pen');$$('[data-color]',panel).forEach(x=>x.classList.toggle('selected',x===b))});
  $('.board-size',panel).value=String(board.size);$('.board-size',panel).onchange=e=>board.size=+e.target.value;
  $$('[data-symbol]',panel).forEach(b=>b.onclick=()=>{const existing=board.items.filter(x=>x.type==='text').length;commit({type:'text',symbol:true,value:b.dataset.symbol,x:Math.min(760,90+(existing%5)*135),y:Math.min(410,70+Math.floor(existing/5)*65),color:board.color,fontSize:30});mode('select');selectItem(board.items[board.items.length-1])});
- $$('[data-board-action]',panel).forEach(b=>b.onclick=()=>{const a=b.dataset.boardAction;if(a==='undo'&&board.items.length){board.redo.push(board.items.pop());draw()}if(a==='redo'&&board.redo.length){board.items.push(board.redo.pop());draw()}if(a==='clear'&&confirm('¿Vaciar la pizarra de este apartado?')){board.items=[];board.redo=[];draw()}if(a==='download'){const c=document.createElement('canvas');c.width=1600;c.height=800;const ctx=c.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,1600,800);ctx.scale(1.6,1.6);board.items.forEach(it=>{if(it.type==='stroke'){ctx.beginPath();ctx.strokeStyle=it.tool==='eraser'?'white':it.color;ctx.lineWidth=it.tool==='eraser'?25:it.size;ctx.lineCap='round';ctx.lineJoin='round';it.points.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.stroke()}else{ctx.fillStyle=it.color;ctx.font=`600 ${it.fontSize||24}px Arial`;it.value.split('\n').forEach((line,j)=>ctx.fillText(line,it.x+5,it.y+30+j*33))}});const link=document.createElement('a');link.download=`pizarra-${k}.png`;link.href=c.toDataURL('image/png');link.click();toast('Pizarra guardada como PNG')}});
+ $$('[data-board-action]',panel).forEach(b=>b.onclick=()=>{const a=b.dataset.boardAction;if(a==='undo'&&board.items.length){board.redo.push(board.items.pop());draw()}if(a==='redo'&&board.redo.length){board.items.push(board.redo.pop());draw()}if(a==='clear'&&confirm('¿Vaciar la pizarra de este apartado?')){board.items=[];board.redo=[];draw()}if(a==='download'){const c=document.createElement('canvas');c.width=1600;c.height=800;const ctx=c.getContext('2d');ctx.scale(1.6,1.6);board.items.forEach(it=>{if(it.type==='stroke'){ctx.beginPath();ctx.globalCompositeOperation=it.tool==='eraser'?'destination-out':'source-over';ctx.strokeStyle=it.color;ctx.lineWidth=it.tool==='eraser'?28:it.size;ctx.lineCap='round';ctx.lineJoin='round';it.points.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.stroke();ctx.globalCompositeOperation='source-over'}else{ctx.globalCompositeOperation='source-over';ctx.fillStyle=it.color;ctx.font=`600 ${it.fontSize||24}px Arial`;it.value.split('\n').forEach((line,j)=>ctx.fillText(line,it.x+5,it.y+30+j*33))}});ctx.globalCompositeOperation='destination-over';ctx.fillStyle='#fff';ctx.fillRect(0,0,1000,500);ctx.globalCompositeOperation='source-over';const link=document.createElement('a');link.download=`pizarra-${k}.png`;link.href=c.toDataURL('image/png');link.click();toast('Pizarra guardada como PNG')}});
  work.dataset.mode=board.tool;draw();
 }
 function renderOverview(){$('#overviewCards').innerHTML=EXERCISES.map(e=>`<button class="overview-item" data-open="${e.id}"><span class="tagline">EJERCICIO ${String(e.id).padStart(2,'0')} ${e.star?'· ★ PRIORITARIO':''}</span><strong>${esc(e.title)}</strong><small>${esc(e.summary)}</small><div class="bottom"><span class="pill">${e.parts.length} apartados · ${e.points} pt</span><span>${state.done.has(e.id)?'✓ Hecho':'→ Abrir'}</span></div></button>`).join('');$$('[data-open]').forEach(b=>b.onclick=()=>goEx(+b.dataset.open))}
